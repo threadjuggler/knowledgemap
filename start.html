@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Knowledge Map - Start</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { display: flex; width: 100vw; height: 100vh; overflow: hidden; background: #000; }
+    #left-panel  { flex: 0 0 60%; height: 100%; position: relative; }
+    #right-panel { flex: 0 0 40%; height: 100%; border-left: 2px solid #333; background: #fff; }
+    #graph-canvas { display: block; }
+    #hud-canvas   { position: absolute; top: 0; left: 0; pointer-events: none; }
+    #content-frame { width: 100%; height: 100%; border: none; }
+    #hud {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #fff;
+      font-family: monospace;
+      font-size: 14px;
+      background: rgba(0, 0, 0, 0.55);
+      padding: 4px 14px;
+      border-radius: 4px;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #title-label {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 15px;
+      font-weight: bold;
+      pointer-events: none;
+      text-shadow: 0 1px 3px #000;
+    }
+    .sphere-label {
+      position: absolute;
+      color: #fff;
+      font-family: monospace;
+      font-size: 13px;
+      font-weight: bold;
+      pointer-events: none;
+      transform: translate(-50%, -200%);
+      text-shadow: 0 1px 3px #000;
+    }
+  </style>
+</head>
+<body>
+  <div id="left-panel">
+    <canvas id="graph-canvas"></canvas>
+    <canvas id="hud-canvas"></canvas>
+    <div id="title-label">Knowledge Map v0.01</div>
+    <div id="hud">loading…</div>
+  </div>
+  <div id="right-panel">
+    <iframe id="content-frame" src=""></iframe>
+  </div>
+
+  <script src="lib/three.min.js"></script>
+  <script>
+    window.addEventListener('load', () => {
+      const hud      = document.getElementById('hud');
+      const frame    = document.getElementById('content-frame');
+      const hudCanvas = document.getElementById('hud-canvas');
+      const hCtx     = hudCanvas.getContext('2d');
+
+      if (typeof THREE === 'undefined') {
+        hud.textContent = 'ERROR: Three.js did not load (check network)';
+        hud.style.color = '#f55';
+        return;
+      }
+
+      const canvas = document.getElementById('graph-canvas');
+      const panelW = () => Math.floor(window.innerWidth * 0.6);
+      const panelH = () => window.innerHeight;
+
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setClearColor(0x000000);
+      renderer.setSize(panelW(), panelH());
+
+      const scene  = new THREE.Scene();
+      const camera = new THREE.PerspectiveCamera(60, panelW() / panelH(), 0.1, 2000);
+      camera.position.set(0, 0, 350);
+      camera.lookAt(0, 0, 0);
+
+      // Lights
+      scene.add(new THREE.AmbientLight(0x882222));
+      const keyLight = new THREE.PointLight(0xffffff, 1.5, 1000);
+      keyLight.position.set(150, 150, 200);
+      scene.add(keyLight);
+
+      const group = new THREE.Group();
+      scene.add(group);
+
+      const positions = [
+        new THREE.Vector3(-120,  70, 0),
+        new THREE.Vector3(   0, -70, 0),
+        new THREE.Vector3( 120,  70, 0)
+      ];
+      const nodeFiles = ['node1.html', 'node2.html', 'node3.html'];
+
+      const leftPanel = document.getElementById('left-panel');
+      const sphereGeom = new THREE.SphereGeometry(30, 32, 32);
+      const sphereMeshes = positions.map((pos, i) => {
+        const mesh = new THREE.Mesh(
+          sphereGeom,
+          new THREE.MeshPhongMaterial({ color: 0xff2222, shininess: 90 })
+        );
+        mesh.position.copy(pos);
+        mesh.userData.nodeFile = nodeFiles[i];
+        group.add(mesh);
+
+        const label = document.createElement('div');
+        label.className = 'sphere-label';
+        label.textContent = `Node${i + 1}`;
+        leftPanel.appendChild(label);
+        mesh.userData.label = label;
+
+        return mesh;
+      });
+
+      const worldPos = new THREE.Vector3();
+
+      // Connecting cylinders
+      const tubeMat = new THREE.MeshPhongMaterial({ color: 0xff4444 });
+      const up = new THREE.Vector3(0, 1, 0);
+      [[0, 1], [1, 2]].forEach(([a, b]) => {
+        const start = positions[a].clone();
+        const end   = positions[b].clone();
+        const dir   = end.clone().sub(start);
+        const len   = dir.length();
+        const mid   = start.clone().add(end).multiplyScalar(0.5);
+        const cyl   = new THREE.Mesh(new THREE.CylinderGeometry(5, 5, len, 8), tubeMat);
+        cyl.position.copy(mid);
+        cyl.quaternion.setFromUnitVectors(up, dir.normalize());
+        group.add(cyl);
+      });
+
+      // Right-drag rotates camera in place (FPS look-around)
+      camera.rotation.order = 'YXZ';
+
+      let leftDown = false, rightDown = false, dragged = false, lastX = 0, lastY = 0;
+      canvas.addEventListener('mousedown', e => {
+        if (e.button === 0) { leftDown = true; dragged = false; }
+        if (e.button === 2) { rightDown = true; }
+        if (e.button === 0 || e.button === 2) { lastX = e.clientX; lastY = e.clientY; }
+      });
+      window.addEventListener('mouseup', e => {
+        if (e.button === 0) leftDown = false;
+        if (e.button === 2) rightDown = false;
+      });
+      canvas.addEventListener('mousemove', e => {
+        if (!leftDown && !rightDown) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX; lastY = e.clientY;
+        if (leftDown) {
+          if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragged = true;
+          group.rotation.y += dx * 0.008;
+          group.rotation.x += dy * 0.008;
+        }
+        if (rightDown) {
+          camera.rotation.y -= dx * 0.008;
+          camera.rotation.x = Math.max(-Math.PI / 2 + 0.05,
+            Math.min(Math.PI / 2 - 0.05, camera.rotation.x - dy * 0.008));
+        }
+      });
+      canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+      const lookDir = new THREE.Vector3();
+      canvas.addEventListener('wheel', e => {
+        e.preventDefault();
+        camera.getWorldDirection(lookDir);
+        camera.position.addScaledVector(lookDir, -e.deltaY * 0.5);
+      }, { passive: false });
+
+      const raycaster = new THREE.Raycaster();
+      const mouse = new THREE.Vector2();
+      canvas.addEventListener('click', e => {
+        if (dragged) return;
+        const rect = canvas.getBoundingClientRect();
+        mouse.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+        mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+        raycaster.setFromCamera(mouse, camera);
+        const hits = raycaster.intersectObjects(sphereMeshes);
+        if (hits.length > 0) {
+          frame.src = hits[0].object.userData.nodeFile;
+        }
+      });
+
+      const resizeHud = () => {
+        hudCanvas.width  = panelW();
+        hudCanvas.height = panelH();
+      };
+      window.addEventListener('resize', () => {
+        renderer.setSize(panelW(), panelH());
+        camera.aspect = panelW() / panelH();
+        camera.updateProjectionMatrix();
+        resizeHud();
+      });
+      resizeHud();
+
+      // --- Origin waypoint arrow ---
+      const originVec = new THREE.Vector3(0, 0, 0);
+      const MARGIN = 44; // px from panel edge where arrow is placed
+
+      function drawOriginArrow(w, h) {
+        hCtx.clearRect(0, 0, w, h);
+
+        const proj = originVec.clone().project(camera);
+        // NDC: x,y in [-1,1], z<1 means in front of camera
+        const inView = proj.z < 1
+          && proj.x > -1 && proj.x < 1
+          && proj.y > -1 && proj.y < 1;
+
+        if (inView) return; // origin visible — no arrow needed
+
+        // Screen coords of projected origin (may be off-screen or behind)
+        let dx = (proj.x + 1) / 2 * w - w / 2;
+        let dy = (1 - proj.y) / 2 * h - h / 2;
+
+        // If origin is behind the camera, flip direction so arrow still
+        // points "back toward" the origin from the current look direction
+        if (proj.z >= 1) { dx = -dx; dy = -dy; }
+
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len < 0.001) return;
+        const nx = dx / len, ny = dy / len;
+
+        // Clamp to a point on the panel edge (inset by MARGIN)
+        const halfW = w / 2 - MARGIN, halfH = h / 2 - MARGIN;
+        const tx = nx !== 0 ? halfW / Math.abs(nx) : Infinity;
+        const ty = ny !== 0 ? halfH / Math.abs(ny) : Infinity;
+        const t  = Math.min(tx, ty);
+        const ex = w / 2 + nx * t;
+        const ey = h / 2 + ny * t;
+
+        const angle = Math.atan2(ny, nx);
+        const R = 18; // arrow circle radius
+
+        // Circle background
+        hCtx.beginPath();
+        hCtx.arc(ex, ey, R, 0, Math.PI * 2);
+        hCtx.fillStyle = 'rgba(0,0,0,0.55)';
+        hCtx.fill();
+        hCtx.strokeStyle = 'rgba(255,255,255,0.7)';
+        hCtx.lineWidth = 1.5;
+        hCtx.stroke();
+
+        // Filled arrow triangle pointing toward origin
+        const TIP = R - 3, WING = 7, TAIL = 6;
+        hCtx.save();
+        hCtx.translate(ex, ey);
+        hCtx.rotate(angle);
+        hCtx.beginPath();
+        hCtx.moveTo( TIP,    0);
+        hCtx.lineTo(-TAIL,  -WING);
+        hCtx.lineTo(-TAIL,   WING);
+        hCtx.closePath();
+        hCtx.fillStyle = '#ff4444';
+        hCtx.fill();
+        hCtx.restore();
+
+        // Small "origin" label beneath the arrow
+        hCtx.fillStyle = 'rgba(255,255,255,0.85)';
+        hCtx.font = 'bold 10px monospace';
+        hCtx.textAlign = 'center';
+        hCtx.fillText('origin', ex, ey + R + 12);
+      }
+
+      const deg = r => (r * 180 / Math.PI).toFixed(1);
+      (function animate() {
+        requestAnimationFrame(animate);
+        renderer.render(scene, camera);
+
+        const w = panelW(), h = panelH();
+
+        // Sphere label positions
+        sphereMeshes.forEach(mesh => {
+          mesh.getWorldPosition(worldPos);
+          const p = worldPos.clone().project(camera);
+          mesh.userData.label.style.left = ((p.x + 1) / 2 * w) + 'px';
+          mesh.userData.label.style.top  = (-(p.y - 1) / 2 * h) + 'px';
+        });
+
+        drawOriginArrow(w, h);
+
+        hud.textContent =
+          `X: ${deg(group.rotation.x)}°   Y: ${deg(group.rotation.y)}°   Z: ${deg(group.rotation.z)}°`;
+      })();
+    });
+  </script>
+</body>
+</html>
